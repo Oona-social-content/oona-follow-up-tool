@@ -270,13 +270,25 @@
                 mediumPriority: [],
                 lowPriority: []
             };
+function analyzeFollowUpNeeds(firstVisits, thisWeek, historical) {
+            const results = {
+                highPriority: [],
+                mediumPriority: [],
+                lowPriority: []
+            };
 
-            // Create a map of who has appointments this week
-            const thisWeekPatients = new Set();
-            thisWeek.forEach(appt => {
+            // Filter to only "Booked" appointments from the 60-day report
+            const bookedAppointments = thisWeek.filter(appt => {
+                const state = appt['state'] || '';
+                return state.toLowerCase().trim() === 'booked';
+            });
+
+            // Create a map of who has booked appointments in the next 60 days
+            const futurePatients = new Set();
+            bookedAppointments.forEach(appt => {
                 const fullName = getPatientFullName(appt);
                 if (fullName) {
-                    thisWeekPatients.add(fullName.toLowerCase().trim());
+                    futurePatients.add(fullName.toLowerCase().trim());
                 }
             });
 
@@ -288,8 +300,8 @@
                 
                 if (!patientName) return;
 
-                // Check if they have follow-up booked this week
-                const hasFollowUp = thisWeekPatients.has(patientName.toLowerCase().trim());
+                // Check if they have follow-up booked in next 60 days
+                const hasFollowUp = futurePatients.has(patientName.toLowerCase().trim());
                 
                 if (!hasFollowUp) {
                     // Calculate days since visit
@@ -319,7 +331,7 @@
             });
 
             // Also check for regular patients who haven't been seen recently
-            const recentPatients = getRecentPatientsWithoutFollowUp(historical, thisWeekPatients);
+            const recentPatients = getRecentPatientsWithoutFollowUp(historical, futurePatients);
             recentPatients.forEach(patient => {
                 if (patient.daysSince >= 21) {
                     results.highPriority.push(patient);
@@ -330,6 +342,8 @@
 
             return results;
         }
+
+
 
         function getPatientFullName(record) {
             const firstName = record['patient_first_name'] || record['patient_preferred_name'] || '';
@@ -384,7 +398,7 @@
             }
         }
 
-        function getRecentPatientsWithoutFollowUp(historical, thisWeekPatients) {
+        function getRecentPatientsWithoutFollowUp(historical, futurePatients) {
             const patientMap = new Map();
             
             // Find each patient's most recent visit
@@ -393,7 +407,7 @@
                 const visitDate = visit['start_at'] || visit['arrived_at'] || '';
                 const practitioner = visit['staff_member_name'] || '';
                 
-                if (!patientName || thisWeekPatients.has(patientName.toLowerCase().trim())) return;
+                if (!patientName || futurePatients.has(patientName.toLowerCase().trim())) return;
                 
                 const daysSince = calculateDaysSince(visitDate);
                 
