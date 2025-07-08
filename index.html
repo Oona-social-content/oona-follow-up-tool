@@ -297,6 +297,9 @@
 
                 // Skip massage therapy, psychotherapy, and social worker appointments
                 if (treatmentName.includes('massage therapy') || 
+                    treatmentName.includes('massage') ||
+                    treatmentName.includes('rmt') ||
+                    treatmentName.includes('registered massage therapy') ||
                     treatmentName.includes('psychotherapy') || 
                     treatmentName.includes('social worker')) {
                     return;
