@@ -117,7 +117,7 @@
             <ol>
                 <li><strong>Export from Jane:</strong> Go to Reports → Appointments</li>
                 <li><strong>Last week first visits:</strong> Filter to "Arrived" + "First Visit" for last week</li>
-                <li><strong>Next 60 days appointments:</strong> Filter to "Booked" for next 60 days</li>
+                <li><strong>Next 60 days appointments:</strong> Export all appointments for next 60 days (tool will filter to "Booked" automatically)</li>
                 <li><strong>Historical data:</strong> Export "Arrived" appointments for last 8 weeks (to track visit patterns)</li>
                 <li><strong>Upload files here</strong> and get your follow-up list!</li>
             </ol>
@@ -135,7 +135,7 @@
                 <div>
                     <label for="thisWeek"><strong>Next 60 Days Future Appointments</strong></label><br>
                     <input type="file" id="thisWeek" accept=".csv,.xlsx" />
-                    <small>Jane export: Booked appointments for next 60 days</small>
+                    <small>Jane export: All appointments for next 60 days (any status)</small>
                 </div>
                 
                 <div>
@@ -270,12 +270,6 @@
                 mediumPriority: [],
                 lowPriority: []
             };
-function analyzeFollowUpNeeds(firstVisits, thisWeek, historical) {
-            const results = {
-                highPriority: [],
-                mediumPriority: [],
-                lowPriority: []
-            };
 
             // Filter to only "Booked" appointments from the 60-day report
             const bookedAppointments = thisWeek.filter(appt => {
@@ -350,8 +344,6 @@ function analyzeFollowUpNeeds(firstVisits, thisWeek, historical) {
 
             return results;
         }
-
-
 
         function getPatientFullName(record) {
             const firstName = record['patient_first_name'] || record['patient_preferred_name'] || '';
