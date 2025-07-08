@@ -292,13 +292,21 @@ function analyzeFollowUpNeeds(firstVisits, thisWeek, historical) {
                 }
             });
 
-            // Process first visits from last week
+            // Process first visits from last week - exclude certain treatment types
             firstVisits.forEach(visit => {
                 const patientName = getPatientFullName(visit);
                 const practitioner = visit['staff_member_name'] || '';
                 const visitDate = visit['start_at'] || visit['arrived_at'] || '';
+                const treatmentName = (visit['treatment_name'] || '').toLowerCase();
                 
                 if (!patientName) return;
+
+                // Skip massage therapy, psychotherapy, and social worker appointments
+                if (treatmentName.includes('massage therapy') || 
+                    treatmentName.includes('psychotherapy') || 
+                    treatmentName.includes('social worker')) {
+                    return;
+                }
 
                 // Check if they have follow-up booked in next 60 days
                 const hasFollowUp = futurePatients.has(patientName.toLowerCase().trim());
