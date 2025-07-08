@@ -84,15 +84,6 @@
             background: #f1f2f6;
             font-weight: bold;
         }
-        .high-priority {
-            background-color: #ffebee;
-        }
-        .medium-priority {
-            background-color: #fff3e0;
-        }
-        .low-priority {
-            background-color: #f1f8e9;
-        }
         .instructions {
             background: #fff9c4;
             padding: 15px;
@@ -156,6 +147,10 @@
             <h3>📞 Your Follow-Up Action List</h3>
             <p id="summary"></p>
             
+            <div style="margin-bottom: 20px; text-align: center;">
+                <button onclick="togglePractitionerView()" id="practitionerToggle">👩‍⚕️ Group by Practitioner</button>
+            </div>
+            
             <div class="follow-up-list">
                 <h4>🔴 High Priority (3+ weeks since last visit)</h4>
                 <table id="highPriorityTable">
@@ -164,6 +159,7 @@
                             <th>Patient Name</th>
                             <th>Last Visit</th>
                             <th>Practitioner</th>
+                            <th>Treatment Type</th>
                             <th>Days Since</th>
                             <th>Visit Count</th>
                             <th>Recommended Action</th>
@@ -181,6 +177,7 @@
                             <th>Patient Name</th>
                             <th>Last Visit</th>
                             <th>Practitioner</th>
+                            <th>Treatment Type</th>
                             <th>Days Since</th>
                             <th>Visit Count</th>
                             <th>Recommended Action</th>
@@ -198,6 +195,7 @@
                             <th>Patient Name</th>
                             <th>Last Visit</th>
                             <th>Practitioner</th>
+                            <th>Treatment Type</th>
                             <th>Days Since</th>
                             <th>Visit Count</th>
                             <th>Recommended Action</th>
@@ -207,9 +205,38 @@
                 </table>
             </div>
 
+            <div class="follow-up-list" style="margin-top: 30px;">
+                <h4>🆕 New Patients Who Haven't Rebooked (All Services Except Psychotherapy)</h4>
+                <table id="newPatientsTable">
+                    <thead>
+                        <tr>
+                            <th>Patient Name</th>
+                            <th>First Visit Date</th>
+                            <th>Practitioner</th>
+                            <th>Treatment Type</th>
+                            <th>Days Since</th>
+                            <th>Recommended Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="newPatientsBody"></tbody>
+                </table>
+            </div>
+
             <div style="margin-top: 20px;">
                 <button class="export-btn" onclick="exportToCSV()">📊 Export to CSV</button>
                 <button class="export-btn" onclick="exportToGoogleSheets()">📋 Copy for Google Sheets</button>
+            </div>
+        </div>
+
+        <!-- Practitioner View -->
+        <div id="practitionerResults" class="results" style="display: none;">
+            <h3>👩‍⚕️ Follow-Up Analysis by Practitioner</h3>
+            <p id="practitionerSummary"></p>
+            <div id="practitionerTables"></div>
+            
+            <div style="margin-top: 20px;">
+                <button class="export-btn" onclick="exportPractitionerToCSV()">📊 Export Practitioner Analysis</button>
+                <button onclick="togglePractitionerView()" id="practitionerToggle2">📋 Back to Priority View</button>
             </div>
         </div>
     </div>
@@ -219,8 +246,11 @@
         let processedData = {
             highPriority: [],
             mediumPriority: [],
-            lowPriority: []
+            lowPriority: [],
+            newPatients: []
         };
+
+        let practitionerView = false;
 
         async function processFiles() {
             const firstVisitsFile = document.getElementById('firstVisits').files[0];
@@ -237,7 +267,6 @@
                 const thisWeekData = await readFile(thisWeekFile);
                 const historicalData = await readFile(historicalFile);
 
-                // Process the data to find follow-up candidates
                 const followUpCandidates = analyzeFollowUpNeeds(firstVisitsData, thisWeekData, historicalData);
                 
                 displayResults(followUpCandidates);
@@ -268,16 +297,15 @@
             const results = {
                 highPriority: [],
                 mediumPriority: [],
-                lowPriority: []
+                lowPriority: [],
+                newPatients: []
             };
 
-            // Filter to only "Booked" appointments from the 60-day report
             const bookedAppointments = thisWeek.filter(appt => {
                 const state = appt['state'] || '';
                 return state.toLowerCase().trim() === 'booked';
             });
 
-            // Create a map of who has booked appointments in the next 60 days
             const futurePatients = new Set();
             bookedAppointments.forEach(appt => {
                 const fullName = getPatientFullName(appt);
@@ -286,56 +314,82 @@
                 }
             });
 
-            // Process first visits from last week - exclude certain treatment types
             firstVisits.forEach(visit => {
                 const patientName = getPatientFullName(visit);
                 const practitioner = visit['staff_member_name'] || '';
                 const visitDate = visit['start_at'] || visit['arrived_at'] || '';
                 const treatmentName = (visit['treatment_name'] || '').toLowerCase();
+                const practitionerName = (practitioner || '').toLowerCase();
                 
-                if (!patientName) return;
-
-                // Skip massage therapy, psychotherapy, and social worker appointments
-                if (treatmentName.includes('massage therapy') || 
-                    treatmentName.includes('massage') ||
-                    treatmentName.includes('rmt') ||
-                    treatmentName.includes('registered massage therapy') ||
-                    treatmentName.includes('psychotherapy') || 
-                    treatmentName.includes('social worker')) {
-                    return;
+                // Skip childminding appointments
+                if (treatmentName.includes('childminding')) {
+                    return; // Skip this appointment entirely
                 }
-
-                // Check if they have follow-up booked in next 60 days
-                const hasFollowUp = futurePatients.has(patientName.toLowerCase().trim());
                 
-                if (!hasFollowUp) {
-                    // Calculate days since visit
-                    const daysSince = calculateDaysSince(visitDate);
+                if (!patientName) {
+                    // Skip if no patient name
+                } else {
+                    // For new patient tracking (includes RMT, excludes psychotherapy)
+                    const isNotPsychotherapy = !treatmentName.includes('psychotherapy') && !practitionerName.includes('psychotherapy');
                     
-                    // Get visit count from historical data
-                    const visitCount = countVisits(patientName, historical);
-                    
-                    const followUpItem = {
-                        patientName: patientName,
-                        lastVisit: formatDate(visitDate),
-                        practitioner: practitioner,
-                        daysSince: daysSince,
-                        visitCount: visitCount,
-                        action: getRecommendedAction(daysSince, visitCount)
-                    };
+                    if (isNotPsychotherapy) {
+                        const hasFollowUp = futurePatients.has(patientName.toLowerCase().trim());
+                        
+                        if (!hasFollowUp) {
+                            const daysSince = calculateDaysSince(visitDate);
+                            
+                            results.newPatients.push({
+                                patientName: patientName,
+                                firstVisitDate: formatDate(visitDate),
+                                practitioner: practitioner,
+                                treatmentType: visit['treatment_name'] || '',
+                                daysSince: daysSince,
+                                action: getNewPatientAction(daysSince, practitionerName.includes('rmt'))
+                            });
+                        }
+                    }
 
-                    // Categorize by priority
-                    if (daysSince >= 21) {
-                        results.highPriority.push(followUpItem);
-                    } else if (daysSince >= 14) {
-                        results.mediumPriority.push(followUpItem);
-                    } else if (daysSince >= 7) {
-                        results.lowPriority.push(followUpItem);
+                    // For main follow-up list (excludes massage/RMT/psychotherapy)
+                    const isMassageRelated = treatmentName.includes('massage therapy') || 
+                        treatmentName.includes('massage') ||
+                        treatmentName.includes('rmt') ||
+                        treatmentName.includes('registered massage therapy') ||
+                        practitionerName.includes('rmt') ||
+                        practitionerName.includes('massage');
+                    
+                    const isPsychRelated = treatmentName.includes('psychotherapy') || 
+                        treatmentName.includes('social worker') ||
+                        practitionerName.includes('psychotherapy');
+
+                    if (!isMassageRelated && !isPsychRelated) {
+                        const hasFollowUp = futurePatients.has(patientName.toLowerCase().trim());
+                        
+                        if (!hasFollowUp) {
+                            const daysSince = calculateDaysSince(visitDate);
+                            const visitCount = countVisits(patientName, historical);
+                            
+                            const followUpItem = {
+                                patientName: patientName,
+                                lastVisit: formatDate(visitDate),
+                                practitioner: practitioner,
+                                treatmentType: visit['treatment_name'] || '',
+                                daysSince: daysSince,
+                                visitCount: visitCount,
+                                action: getRecommendedAction(daysSince, visitCount)
+                            };
+
+                            if (daysSince >= 21) {
+                                results.highPriority.push(followUpItem);
+                            } else if (daysSince >= 14) {
+                                results.mediumPriority.push(followUpItem);
+                            } else if (daysSince >= 7) {
+                                results.lowPriority.push(followUpItem);
+                            }
+                        }
                     }
                 }
             });
 
-            // Also check for regular patients who haven't been seen recently
             const recentPatients = getRecentPatientsWithoutFollowUp(historical, futurePatients);
             recentPatients.forEach(patient => {
                 if (patient.daysSince >= 21) {
@@ -387,6 +441,18 @@
             }).length;
         }
 
+        function getNewPatientAction(daysSince, isRMT) {
+            if (isRMT) {
+                if (daysSince >= 14) return "Call - RMT follow-up check";
+                if (daysSince >= 7) return "Text - how are you feeling?";
+                return "Email - gentle check-in";
+            } else {
+                if (daysSince >= 14) return "Call - new patient follow-up";
+                if (daysSince >= 7) return "Text - ready for next visit?";
+                return "Email - welcome follow-up";
+            }
+        }
+
         function getRecommendedAction(daysSince, visitCount) {
             if (visitCount === 1) {
                 if (daysSince >= 21) return "Phone call - first visit follow-up";
@@ -404,29 +470,50 @@
         function getRecentPatientsWithoutFollowUp(historical, futurePatients) {
             const patientMap = new Map();
             
-            // Find each patient's most recent visit
             historical.forEach(visit => {
                 const patientName = getPatientFullName(visit);
                 const visitDate = visit['start_at'] || visit['arrived_at'] || '';
                 const practitioner = visit['staff_member_name'] || '';
+                const treatmentName = (visit['treatment_name'] || '').toLowerCase();
+                const practitionerName = (practitioner || '').toLowerCase();
                 
-                if (!patientName || futurePatients.has(patientName.toLowerCase().trim())) return;
+                // Skip childminding appointments
+                if (treatmentName.includes('childminding')) {
+                    return; // Skip this appointment entirely
+                }
                 
-                const daysSince = calculateDaysSince(visitDate);
-                
-                if (!patientMap.has(patientName) || daysSince < patientMap.get(patientName).daysSince) {
-                    patientMap.set(patientName, {
-                        patientName: patientName,
-                        lastVisit: formatDate(visitDate),
-                        practitioner: practitioner,
-                        daysSince: daysSince,
-                        visitCount: countVisits(patientName, historical),
-                        action: getRecommendedAction(daysSince, countVisits(patientName, historical))
-                    });
+                if (!patientName || futurePatients.has(patientName.toLowerCase().trim())) {
+                    // Skip
+                } else {
+                    const isMassageRelated = treatmentName.includes('massage therapy') || 
+                        treatmentName.includes('massage') ||
+                        treatmentName.includes('rmt') ||
+                        treatmentName.includes('registered massage therapy') ||
+                        practitionerName.includes('rmt') ||
+                        practitionerName.includes('massage');
+                    
+                    const isPsychRelated = treatmentName.includes('psychotherapy') || 
+                        treatmentName.includes('social worker') ||
+                        practitionerName.includes('psychotherapy');
+
+                    if (!isMassageRelated && !isPsychRelated) {
+                        const daysSince = calculateDaysSince(visitDate);
+                        
+                        if (!patientMap.has(patientName) || daysSince < patientMap.get(patientName).daysSince) {
+                            patientMap.set(patientName, {
+                                patientName: patientName,
+                                lastVisit: formatDate(visitDate),
+                                practitioner: practitioner,
+                                treatmentType: visit['treatment_name'] || '',
+                                daysSince: daysSince,
+                                visitCount: countVisits(patientName, historical),
+                                action: getRecommendedAction(daysSince, countVisits(patientName, historical))
+                            });
+                        }
+                    }
                 }
             });
             
-            // Return patients who haven't been seen in 14+ days
             return Array.from(patientMap.values()).filter(patient => patient.daysSince >= 14);
         }
 
@@ -434,17 +521,23 @@
             processedData = results;
             
             const totalFollowUps = results.highPriority.length + results.mediumPriority.length + results.lowPriority.length;
+            const totalNewPatients = results.newPatients.length;
             
             document.getElementById('summary').innerHTML = `
-                <strong>📊 Summary:</strong> ${totalFollowUps} patients need follow-up<br>
+                <strong>📊 Summary:</strong> ${totalFollowUps} patients need follow-up | ${totalNewPatients} new patients haven't rebooked<br>
                 🔴 High Priority: ${results.highPriority.length} | 
                 🟡 Medium Priority: ${results.mediumPriority.length} | 
-                🟢 Low Priority: ${results.lowPriority.length}
+                🟢 Low Priority: ${results.lowPriority.length} |
+                🆕 New Patients: ${totalNewPatients}
             `;
 
             populateTable('highPriorityBody', results.highPriority);
             populateTable('mediumPriorityBody', results.mediumPriority);
             populateTable('lowPriorityBody', results.lowPriority);
+            populateNewPatientsTable('newPatientsBody', results.newPatients);
+
+            // Generate practitioner analysis
+            generatePractitionerAnalysis(results);
 
             document.getElementById('results').style.display = 'block';
         }
@@ -459,6 +552,7 @@
                     <td>${item.patientName}</td>
                     <td>${item.lastVisit}</td>
                     <td>${item.practitioner}</td>
+                    <td>${item.treatmentType || ''}</td>
                     <td>${item.daysSince} days</td>
                     <td>${item.visitCount} visits</td>
                     <td>${item.action}</td>
@@ -467,34 +561,277 @@
 
             if (data.length === 0) {
                 const row = tbody.insertRow();
-                row.innerHTML = '<td colspan="6" style="text-align: center; color: #666;">No patients in this category</td>';
+                row.innerHTML = '<td colspan="7" style="text-align: center; color: #666;">No patients in this category</td>';
             }
+        }
+
+        function populateNewPatientsTable(tableBodyId, data) {
+            const tbody = document.getElementById(tableBodyId);
+            tbody.innerHTML = '';
+
+            data.forEach(item => {
+                const row = tbody.insertRow();
+                row.innerHTML = `
+                    <td>${item.patientName}</td>
+                    <td>${item.firstVisitDate}</td>
+                    <td>${item.practitioner}</td>
+                    <td>${item.treatmentType}</td>
+                    <td>${item.daysSince} days</td>
+                    <td>${item.action}</td>
+                `;
+            });
+
+            if (data.length === 0) {
+                const row = tbody.insertRow();
+                row.innerHTML = '<td colspan="6" style="text-align: center; color: #666;">No new patients without rebookings</td>';
+            }
+        }
+
+        function generatePractitionerAnalysis(results) {
+            const practitionerData = {};
+            
+            // Combine all follow-up patients
+            const allFollowUps = [
+                ...results.highPriority.map(p => ({...p, priority: 'High'})),
+                ...results.mediumPriority.map(p => ({...p, priority: 'Medium'})),
+                ...results.lowPriority.map(p => ({...p, priority: 'Low'}))
+            ];
+            
+            // Group by practitioner
+            allFollowUps.forEach(patient => {
+                const practitioner = patient.practitioner || 'Unknown';
+                if (!practitionerData[practitioner]) {
+                    practitionerData[practitioner] = {
+                        name: practitioner,
+                        totalFollowUps: 0,
+                        highPriority: 0,
+                        mediumPriority: 0,
+                        lowPriority: 0,
+                        newPatients: 0,
+                        patients: []
+                    };
+                }
+                
+                practitionerData[practitioner].totalFollowUps++;
+                practitionerData[practitioner].patients.push(patient);
+                
+                if (patient.priority === 'High') practitionerData[practitioner].highPriority++;
+                else if (patient.priority === 'Medium') practitionerData[practitioner].mediumPriority++;
+                else if (patient.priority === 'Low') practitionerData[practitioner].lowPriority++;
+            });
+            
+            // Add new patients
+            results.newPatients.forEach(patient => {
+                const practitioner = patient.practitioner || 'Unknown';
+                if (!practitionerData[practitioner]) {
+                    practitionerData[practitioner] = {
+                        name: practitioner,
+                        totalFollowUps: 0,
+                        highPriority: 0,
+                        mediumPriority: 0,
+                        lowPriority: 0,
+                        newPatients: 0,
+                        patients: []
+                    };
+                }
+                
+                practitionerData[practitioner].newPatients++;
+                practitionerData[practitioner].patients.push({...patient, priority: 'New Patient'});
+            });
+            
+            // Store for later use
+            window.practitionerAnalysis = practitionerData;
+            
+            // Generate summary
+            const practitioners = Object.values(practitionerData);
+            if (practitioners.length > 0) {
+                const totalPractitioners = practitioners.length;
+                const worstPractitioner = practitioners.reduce((worst, current) => {
+                    const worstTotal = worst.totalFollowUps + worst.newPatients;
+                    const currentTotal = current.totalFollowUps + current.newPatients;
+                    return currentTotal > worstTotal ? current : worst;
+                }, practitioners[0]);
+                
+                document.getElementById('practitionerSummary').innerHTML = `
+                    <strong>📊 Practitioner Analysis:</strong> ${totalPractitioners} practitioners analyzed<br>
+                    <strong>Highest follow-up needs:</strong> ${worstPractitioner.name} (${worstPractitioner.totalFollowUps + worstPractitioner.newPatients} total patients needing attention)
+                `;
+                
+                // Generate tables
+                displayPractitionerTables(practitioners);
+            }
+        }
+
+        function displayPractitionerTables(practitioners) {
+            const container = document.getElementById('practitionerTables');
+            container.innerHTML = '';
+            
+            // Sort practitioners by total issues (follow-ups + new patients)
+            practitioners.sort((a, b) => {
+                const aTotal = a.totalFollowUps + a.newPatients;
+                const bTotal = b.totalFollowUps + b.newPatients;
+                return bTotal - aTotal;
+            });
+            
+            practitioners.forEach(practitioner => {
+                const totalIssues = practitioner.totalFollowUps + practitioner.newPatients;
+                if (totalIssues === 0) return; // Skip practitioners with no issues
+                
+                const practitionerDiv = document.createElement('div');
+                practitionerDiv.className = 'follow-up-list';
+                practitionerDiv.style.marginBottom = '30px';
+                
+                const safeId = practitioner.name.replace(/[^a-zA-Z0-9]/g, '-');
+                
+                practitionerDiv.innerHTML = `
+                    <h4>👩‍⚕️ ${practitioner.name}</h4>
+                    <p style="margin: 10px 0; padding: 10px; background: #f8f9fa; border-radius: 5px;">
+                        <strong>Total Patients Needing Attention: ${totalIssues}</strong><br>
+                        🔴 High Priority: ${practitioner.highPriority} | 
+                        🟡 Medium Priority: ${practitioner.mediumPriority} | 
+                        🟢 Low Priority: ${practitioner.lowPriority} | 
+                        🆕 New Patients: ${practitioner.newPatients}
+                    </p>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Priority</th>
+                                <th>Patient Name</th>
+                                <th>Last Visit</th>
+                                <th>Treatment Type</th>
+                                <th>Days Since</th>
+                                <th>Visit Count</th>
+                                <th>Recommended Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="practitioner-${safeId}"></tbody>
+                    </table>
+                `;
+                
+                container.appendChild(practitionerDiv);
+                
+                // Populate table
+                const tbody = document.getElementById(`practitioner-${safeId}`);
+                practitioner.patients.forEach(patient => {
+                    const row = tbody.insertRow();
+                    const isNewPatient = patient.priority === 'New Patient';
+                    row.innerHTML = `
+                        <td><span style="color: ${getPriorityColor(patient.priority)}">${patient.priority}</span></td>
+                        <td>${patient.patientName}</td>
+                        <td>${isNewPatient ? patient.firstVisitDate : patient.lastVisit}</td>
+                        <td>${patient.treatmentType || ''}</td>
+                        <td>${patient.daysSince} days</td>
+                        <td>${isNewPatient ? '1 visit' : patient.visitCount + ' visits'}</td>
+                        <td>${patient.action}</td>
+                    `;
+                });
+            });
+        }
+
+        function getPriorityColor(priority) {
+            switch(priority) {
+                case 'High': return '#e74c3c';
+                case 'Medium': return '#f39c12';
+                case 'Low': return '#27ae60';
+                case 'New Patient': return '#3498db';
+                default: return '#7f8c8d';
+            }
+        }
+
+        function togglePractitionerView() {
+            practitionerView = !practitionerView;
+            
+            if (practitionerView) {
+                document.getElementById('results').style.display = 'none';
+                document.getElementById('practitionerResults').style.display = 'block';
+            } else {
+                document.getElementById('results').style.display = 'block';
+                document.getElementById('practitionerResults').style.display = 'none';
+            }
+        }
+
+        function exportPractitionerToCSV() {
+            if (!window.practitionerAnalysis) return;
+            
+            const data = [];
+            Object.values(window.practitionerAnalysis).forEach(practitioner => {
+                practitioner.patients.forEach(patient => {
+                    const isNewPatient = patient.priority === 'New Patient';
+                    data.push({
+                        practitioner: practitioner.name,
+                        priority: patient.priority,
+                        patientName: patient.patientName,
+                        lastVisit: isNewPatient ? patient.firstVisitDate : patient.lastVisit,
+                        daysSince: patient.daysSince,
+                        visitCount: isNewPatient ? 1 : patient.visitCount,
+                        action: patient.action,
+                        treatmentType: patient.treatmentType || ''
+                    });
+                });
+            });
+            
+            const csv = convertPractitionerToCSV(data);
+            downloadCSV(csv, 'oona-practitioner-analysis.csv');
+        }
+
+        function convertPractitionerToCSV(data) {
+            if (data.length === 0) return '';
+            
+            const headers = ['Practitioner', 'Priority', 'Patient Name', 'Last Visit', 'Treatment Type', 'Days Since', 'Visit Count', 'Recommended Action'];
+            const csvContent = [
+                headers.join(','),
+                ...data.map(row => [
+                    `"${row.practitioner}"`,
+                    row.priority,
+                    `"${row.patientName}"`,
+                    row.lastVisit,
+                    `"${row.treatmentType}"`,
+                    row.daysSince,
+                    row.visitCount,
+                    `"${row.action}"`
+                ].join(','))
+            ].join('\n');
+            
+            return csvContent;
         }
 
         function exportToCSV() {
             const allData = [
-                ...processedData.highPriority.map(item => ({...item, priority: 'High'})),
-                ...processedData.mediumPriority.map(item => ({...item, priority: 'Medium'})),
-                ...processedData.lowPriority.map(item => ({...item, priority: 'Low'}))
+                ...processedData.highPriority.map(item => ({...item, priority: 'High', category: 'Follow-up'})),
+                ...processedData.mediumPriority.map(item => ({...item, priority: 'Medium', category: 'Follow-up'})),
+                ...processedData.lowPriority.map(item => ({...item, priority: 'Low', category: 'Follow-up'})),
+                ...processedData.newPatients.map(item => ({
+                    patientName: item.patientName,
+                    lastVisit: item.firstVisitDate,
+                    practitioner: item.practitioner,
+                    daysSince: item.daysSince,
+                    visitCount: 1,
+                    action: item.action,
+                    priority: 'New Patient',
+                    category: 'New Patient',
+                    treatmentType: item.treatmentType
+                }))
             ];
 
             const csv = convertToCSV(allData);
-            downloadCSV(csv, 'oona-follow-up-list.csv');
+            downloadCSV(csv, 'oona-complete-follow-up-list.csv');
         }
 
         function convertToCSV(data) {
             if (data.length === 0) return '';
             
-            const headers = ['Priority', 'Patient Name', 'Last Visit', 'Practitioner', 'Days Since', 'Visit Count', 'Recommended Action'];
+            const headers = ['Category', 'Priority', 'Patient Name', 'Last Visit', 'Practitioner', 'Treatment Type', 'Days Since', 'Visit Count', 'Recommended Action'];
             const csvContent = [
                 headers.join(','),
                 ...data.map(row => [
+                    row.category || 'Follow-up',
                     row.priority,
                     `"${row.patientName}"`,
                     row.lastVisit,
                     `"${row.practitioner}"`,
+                    `"${row.treatmentType || ''}"`,
                     row.daysSince,
-                    row.visitCount,
+                    row.visitCount || 1,
                     `"${row.action}"`
                 ].join(','))
             ].join('\n');
@@ -518,7 +855,17 @@
             const allData = [
                 ...processedData.highPriority.map(item => ({...item, priority: 'High'})),
                 ...processedData.mediumPriority.map(item => ({...item, priority: 'Medium'})),
-                ...processedData.lowPriority.map(item => ({...item, priority: 'Low'}))
+                ...processedData.lowPriority.map(item => ({...item, priority: 'Low'})),
+                ...processedData.newPatients.map(item => ({
+                    patientName: item.patientName,
+                    lastVisit: item.firstVisitDate,
+                    practitioner: item.practitioner,
+                    daysSince: item.daysSince,
+                    visitCount: 1,
+                    action: item.action,
+                    priority: 'New Patient',
+                    treatmentType: item.treatmentType
+                }))
             ];
 
             const tsv = allData.map(row => [
@@ -526,12 +873,13 @@
                 row.patientName,
                 row.lastVisit,
                 row.practitioner,
+                row.treatmentType || '',
                 row.daysSince,
-                row.visitCount,
+                row.visitCount || 1,
                 row.action
             ].join('\t')).join('\n');
 
-            navigator.clipboard.writeText('Priority\tPatient Name\tLast Visit\tPractitioner\tDays Since\tVisit Count\tRecommended Action\n' + tsv)
+            navigator.clipboard.writeText('Priority\tPatient Name\tLast Visit\tPractitioner\tTreatment Type\tDays Since\tVisit Count\tRecommended Action\n' + tsv)
                 .then(() => alert('Data copied! Paste directly into Google Sheets.'))
                 .catch(() => alert('Copy failed. Please use the CSV export instead.'));
         }
